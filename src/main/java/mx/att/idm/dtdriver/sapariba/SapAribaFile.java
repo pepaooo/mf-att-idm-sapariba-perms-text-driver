@@ -1,4 +1,4 @@
-package mx.att.idm.dtdriver;
+package mx.att.idm.dtdriver.sapariba;
 
 import com.fasterxml.jackson.databind.JsonNode;
 import com.fasterxml.jackson.databind.ObjectMapper;
@@ -9,26 +9,27 @@ import com.opencsv.*;
 
 import java.io.*;
 import java.nio.charset.StandardCharsets;
-import java.util.ArrayList;
-import java.util.Arrays;
-import java.util.List;
+import java.util.*;
 import java.util.stream.Collectors;
 
 /**
  * Agrega el nombre del archivo de entrada en cada registro del archivo
  * Referencias: https://stackoverflow.com/questions/499010/java-how-to-determine-the-correct-charset-encoding-of-a-stream
  */
-public class AppendFileName implements PreProcessor {
+public class SapAribaFile implements PreProcessor {
 
     //** Variables
-    private static final String STR_BEGIN = "begin";
     private Tracer tracer = null;
-    private char delimiter = ',';
     private String charSet = "UTF-8";
-    private String tagName = "fileName";
-    private String tagPosition = STR_BEGIN;
-    private boolean validateHeader = false;
-    private long minAttrsHeader = 0;
+    private char delimiter = ',';
+    private String delimiterPerms = "|";
+    private int deleteRowsUntil = 0;
+    private boolean validateHeaders = false;
+    private int minAttrsHeaders = 0;
+
+    //** Constantes
+
+    private static final String EMPTY = "";
 
     /**
      * Init from PreProcessor
@@ -57,32 +58,32 @@ public class AppendFileName implements PreProcessor {
                 if (idNode.isValueNode()) {
                     this.delimiter = idNode.asText().charAt(0);
                 }
-                idNode = rootNode.path("tagName");
+                idNode = rootNode.path("delimiterPerms");
                 if (idNode.isValueNode()) {
-                    this.tagName = idNode.asText();
+                    this.delimiterPerms = idNode.asText();
                 }
-                idNode = rootNode.path("tagPosition");
+                idNode = rootNode.path("deleteRowsUntil");
                 if (idNode.isValueNode()) {
-                    this.tagPosition = idNode.asText();
+                    this.deleteRowsUntil = idNode.asInt();
                 }
-                idNode = rootNode.path("validateHeader");
+                idNode = rootNode.path("validateHeaders");
                 if (idNode.isValueNode()) {
-                    this.validateHeader = idNode.asBoolean();
+                    this.validateHeaders = idNode.asBoolean();
                 }
-                idNode = rootNode.path("minAttrsHeader");
+                idNode = rootNode.path("minAttrsHeaders");
                 if (idNode.isValueNode()) {
-                    this.minAttrsHeader = idNode.asLong();
+                    this.minAttrsHeaders = idNode.asInt();
                 }
             }
         } catch (IOException e) {
             tracer.traceMessage("JSONExeception: " + e.getLocalizedMessage());
         }
-        tracer.traceMessage("----tagName: " + this.tagName);
         tracer.traceMessage("----charSet: " + this.charSet);
         tracer.traceMessage("----delimiter: " + this.delimiter);
-        tracer.traceMessage("----tagPosition: " + this.tagPosition);
-        tracer.traceMessage("----validateHeader: " + this.validateHeader);
-        tracer.traceMessage("----minAttrsHeader: " + this.minAttrsHeader);
+        tracer.traceMessage("----delimiterPerms: " + this.delimiterPerms);
+        tracer.traceMessage("----deleteRowsUntil: " + this.deleteRowsUntil);
+        tracer.traceMessage("----validateHeader: " + this.validateHeaders);
+        tracer.traceMessage("----minAttrsHeader: " + this.minAttrsHeaders);
     }
 
     /**
@@ -98,7 +99,7 @@ public class AppendFileName implements PreProcessor {
     public void nextInputFile(File inputFile) throws SkipFileException, WaitException, StatusException, Exception {
         this.tracer.traceMessage("-----AppendFileName nextInputFile-----");
         if (inputFile.getName().matches("(?i:.*\\.csv$)")) {
-            addToCSV(inputFile);
+            groupCSV(inputFile);
         } else {
             throw new SkipFileException();
         }
@@ -109,10 +110,11 @@ public class AppendFileName implements PreProcessor {
      *
      * @param inputFile
      */
-    public void addToCSV(File inputFile) throws StatusException {
+    public void groupCSV(File inputFile) throws StatusException {
         int counter = 0;
         List<String> listRecordOut = null;
         List<String[]> listOfLines = new ArrayList();
+        Map<String, Set<String>> mapUserPerms = new HashMap<>();
 
         this.tracer.traceMessage("Incoming CSV File : " + inputFile.getName());
 
@@ -128,34 +130,33 @@ public class AppendFileName implements PreProcessor {
 
             String[] recordIn;
             while ((recordIn = reader.readNext()) != null) {
+                // Eliminación de filas
+                if (this.deleteRowsUntil > counter) {
+                    this.tracer.traceMessage("Se omite el renglón del archivo :: " + counter);
+                    counter++;
+                    continue;
+                }
+
                 int rLength = recordIn.length;
+
                 // Validación del header
-                if (this.validateHeader && counter == 0) {
-                    if (!(rLength >= this.minAttrsHeader)) {
+                if (this.validateHeaders) {
+                    if (rLength != this.minAttrsHeaders) {
+                        this.tracer.traceMessage("Validation of minimum attributes in header :: " + rLength);
                         throw new StatusException(StatusException.STATUS_FATAL, "The input file does not comply with the format or minimum attributes");
                     }
-                    this.tracer.traceMessage("Validation of minimum attributes in header :: " + rLength);
                     counter++;
                 }
-                if (this.tagPosition.equalsIgnoreCase(STR_BEGIN)) {
-                    if (recordIn[0].matches("(?i:^" + this.tagName + "=.*)")) {
-                        String[] recordOut = (String[]) Arrays.copyOf(recordIn, recordIn.length);
-                        recordOut[0] = (this.tagName + "=" + inputFile.getName());
-                        listOfLines.add(recordOut);
+
+                if (recordIn[0] != null) {
+                    Set<String> permissions = mapUserPerms.get(recordIn[0]);
+                    if (permissions != null) {
+                        permissions.add(recordIn[2]);
+                        mapUserPerms.put(recordIn[0], permissions);
                     } else {
-                        listRecordOut = Arrays.stream(recordIn).collect(Collectors.toList());
-                        listRecordOut.add(0, this.tagName + "=" + inputFile.getName());
-                        listOfLines.add(listRecordOut.toArray(new String[0]));
-                    }
-                } else {
-                    if (recordIn[(rLength - 1)].matches("(?i:^" + this.tagName + "=.*)")) {
-                        String[] recordOut = (String[]) Arrays.copyOf(recordIn, recordIn.length);
-                        recordOut[(rLength - 1)] = (this.tagName + "=" + inputFile.getName());
-                        listOfLines.add(recordOut);
-                    } else {
-                        listRecordOut = Arrays.stream(recordIn).collect(Collectors.toList());
-                        listRecordOut.add(rLength, this.tagName + "=" + inputFile.getName());
-                        listOfLines.add(listRecordOut.toArray(new String[0]));
+                        permissions = new HashSet<>();
+                        permissions.add(recordIn[2]);
+                        mapUserPerms.put(recordIn[0], permissions);
                     }
                 }
             }
@@ -165,6 +166,10 @@ public class AppendFileName implements PreProcessor {
                     "extensión AppendFileName[reader-addToCSV], Exception: " + e.getMessage());
         }
 
+        // Transformación de objetos
+        for (Map.Entry<String, Set<String>> user : mapUserPerms.entrySet()) {
+            listOfLines.add(new String[]{user.getKey(), EMPTY, user.getValue().stream().collect(Collectors.joining(delimiterPerms))});
+        }
 
         //writer = new CSVWriter(new OutputStreamWriter(new FileOutputStream(inputFile), this.charSet), this.delimiter);
         try (CSVWriter writer = new CSVWriter(new OutputStreamWriter(new FileOutputStream(inputFile), this.charSet),
@@ -174,7 +179,7 @@ public class AppendFileName implements PreProcessor {
         } catch (IOException e) {
             this.tracer.traceMessage("Exception: " + e.getLocalizedMessage());
             throw new StatusException(StatusException.STATUS_FATAL, "Se ha presentado la siguiente excepción en la " +
-                    "extensión AppendFileName[writer-addToCSV], Exception: " + e.getMessage());
+                    "extensión AppendFileName[writer-groupCSV], Exception: " + e.getMessage());
         }
 
     }

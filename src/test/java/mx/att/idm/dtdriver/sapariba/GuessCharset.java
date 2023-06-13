@@ -1,4 +1,4 @@
-package mx.att.idm.dtdriver;
+package mx.att.idm.dtdriver.sapariba;
 
 import com.novell.nds.dirxml.driver.delimitedtext.StatusException;
 import com.novell.nds.dirxml.driver.delimitedtext.Tracer;
@@ -6,10 +6,7 @@ import org.apache.logging.log4j.LogManager;
 import org.apache.logging.log4j.Logger;
 import org.junit.Test;
 
-import java.io.FileInputStream;
 import java.io.IOException;
-import java.io.InputStream;
-import java.nio.charset.Charset;
 import java.nio.file.Files;
 import java.nio.file.Path;
 import java.nio.file.Paths;
@@ -92,9 +89,9 @@ public class GuessCharset {
 
     private void testEnconding(String inputFile) {
         try {
-            AppendFileName appendFileName = new AppendFileName();
-            appendFileName.init("", new LocalTracer());
-            String guessChartSet = appendFileName.guessCharset(Paths.get(inputFile).toFile());
+            SapAribaFile sapAribaFile = new SapAribaFile();
+            sapAribaFile.init("", new LocalTracer());
+            String guessChartSet = sapAribaFile.guessCharset(Paths.get(inputFile).toFile());
             logger.info("Charset :: " + guessChartSet);
 
         } catch (StatusException e) {
@@ -105,9 +102,9 @@ public class GuessCharset {
     }
 
     private void testDirectoryEncoding(String directory) {
-        AppendFileName appendFileName = new AppendFileName();
+        SapAribaFile sapAribaFile = new SapAribaFile();
         try {
-            appendFileName.init("", new LocalTracer());
+            sapAribaFile.init("", new LocalTracer());
         } catch (Exception e) {
             e.printStackTrace();
             System.exit(0);
@@ -118,7 +115,7 @@ public class GuessCharset {
                         logger.info(path.getFileName());
                         String guessChartSet = null;
                         try {
-                            guessChartSet = appendFileName.guessCharset(path.toFile());
+                            guessChartSet = sapAribaFile.guessCharset(path.toFile());
                             //logger.info("Charset :: " + guessChartSet);
                         } catch (StatusException e) {
                             e.printStackTrace();
